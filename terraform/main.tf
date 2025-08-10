@@ -183,25 +183,4 @@ provider "helm" {
   }
 }
 
-resource "helm_release" "prometheus" {
-  depends_on = [null_resource.wait_for_eks]
-
-  name       = "prometheus"
-  namespace  = "default"
-  repository = "https://prometheus-community.github.io/helm-charts"
-  chart      = "kube-prometheus-stack"
-  version    = "45.7.0"
-  wait       = true
-  timeout    = 300
-
-  set {
-    name  = "grafana.enabled"
-    value = "true"
-  }
-
-  set {
-    name  = "prometheus.prometheusSpec.serviceMonitorSelectorNilUsesHelmValues"
-    value = "false"
-  }
-}
 

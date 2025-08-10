@@ -150,27 +150,5 @@ resource "aws_eks_node_group" "ashapp_nodes" {
   }
 }
 
-resource "null_resource" "wait_for_eks" {
-  depends_on = [
-    aws_eks_cluster.ashapp,
-    aws_eks_node_group.ashapp_nodes
-  ]
-
-  provisioner "local-exec" {
-    command = <<EOT
-      set -e
-      count=0
-      until kubectl get nodes; do
-        if [ $count -ge 30 ]; then
-          echo "Timeout waiting for EKS nodes"
-          exit 1
-        fi
-        echo "Waiting for EKS nodes to be ready..."
-        sleep 10
-        count=$((count + 1))
-      done
-    EOT
-  }
-}
 
 

@@ -39,7 +39,7 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false
 
-      - name: Terraform Apply (EKS Only)
+      - name: Terraform Apply (EKS & ECR only)
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           terraform apply -auto-approve \
@@ -54,6 +54,12 @@ jobs:
             -target=aws_iam_role_policy_attachment.node_group_AmazonEC2ContainerRegistryReadOnly \
             -target=aws_ecr_repository.ashapp
 
+      - name: Update kubeconfig
+        run: |
+          aws eks update-kubeconfig \
+            --name ashapp \
+            --region "${{ secrets.AWS_REGION }}"
+
       - name: Wait for EKS Nodes
         run: |
           count=0
@@ -67,13 +73,7 @@ jobs:
             count=$((count + 1))
           done
 
-      - name: Update kubeconfig
-        run: |
-          aws eks update-kubeconfig \
-            --name ashapp \
-            --region "${{ secrets.AWS_REGION }}"
-
-      - name: Terraform Apply (Remaining Resources)
+      - name: Terraform Apply (Full)
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -auto-approve
 
@@ -103,7 +103,7 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and Tag Docker Image
+      - name: Build and Push Docker Image
         id: build
         run: |
           ECR_URL="${{ needs.terraform_eks.outputs.ecr_repository_url }}"

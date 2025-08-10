@@ -39,13 +39,24 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false
 
-      - name: Terraform Plan
+      # First apply only EKS infra so kubeconfig works
+      - name: Terraform Apply (EKS Infra Only)
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform plan -out=tfplan -input=false
+        run: terraform apply -auto-approve \
+             -target=aws_eks_cluster.ashapp \
+             -target=aws_eks_node_group.ashapp_nodes
 
-      - name: Terraform Apply
+      # Configure kubeconfig so Helm & k8s providers work
+      - name: Update kubeconfig for EKS
+        run: |
+          aws eks update-kubeconfig \
+            --name "$(terraform -chdir=${{ env.TF_WORKING_DIR }} output -raw eks_cluster_name)" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      # Apply remaining Terraform resources (ECR, Prometheus, etc.)
+      - name: Terraform Apply (Remaining Resources)
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -auto-approve tfplan
+        run: terraform apply -auto-approve
 
       - name: Get Terraform Outputs
         id: tf-outputs

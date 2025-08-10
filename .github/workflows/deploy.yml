@@ -1,4 +1,4 @@
-name: Terraform -> Build -> Push -> Deploy
+name: Terraform -> Build -> Push -> Deploy (Split Apply + Wait for Nodes)
 
 on:
   workflow_dispatch:
@@ -14,10 +14,9 @@ env:
   DEPLOYMENT_CONTAINER_NAME: ashapp
 
 jobs:
-  terraform_eks:
+  terraform-cluster:
     runs-on: ubuntu-latest
     outputs:
-      ecr_repository_url: ${{ steps.tf-outputs.outputs.ecr_repository_url }}
       eks_cluster_name: ${{ steps.tf-outputs.outputs.eks_cluster_name }}
     steps:
       - name: Checkout
@@ -39,54 +38,113 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false
 
-      - name: Terraform Apply (EKS & ECR only)
+      - name: Apply Cluster Only
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: |
-          terraform apply -auto-approve \
-            -target=aws_eks_cluster.ashapp \
-            -target=aws_eks_node_group.ashapp_nodes \
-            -target=aws_iam_role.eks_cluster_role \
-            -target=aws_iam_role.node_group_role \
-            -target=aws_iam_role_policy_attachment.eks_cluster_AmazonEKSClusterPolicy \
-            -target=aws_iam_role_policy_attachment.eks_cluster_AmazonEKSVPCResourceController \
-            -target=aws_iam_role_policy_attachment.node_group_AmazonEKSWorkerNodePolicy \
-            -target=aws_iam_role_policy_attachment.node_group_AmazonEKS_CNI_Policy \
-            -target=aws_iam_role_policy_attachment.node_group_AmazonEC2ContainerRegistryReadOnly \
-            -target=aws_ecr_repository.ashapp
+        run: terraform apply -auto-approve -target=aws_eks_cluster.ashapp
+
+      - name: Get Terraform Outputs (Cluster)
+        id: tf-outputs
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
+
+  configure-kubeconfig:
+    runs-on: ubuntu-latest
+    needs: terraform-cluster
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: '1.27.0'
 
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --name ashapp \
+            --name "${{ needs.terraform-cluster.outputs.eks_cluster_name }}" \
             --region "${{ secrets.AWS_REGION }}"
 
-      - name: Wait for EKS Nodes
-        run: |
-          count=0
-          until kubectl get nodes; do
-            if [ $count -ge 30 ]; then
-              echo "Timeout waiting for EKS nodes"
-              exit 1
-            fi
-            echo "Waiting for EKS nodes to be ready..."
-            sleep 10
-            count=$((count + 1))
-          done
+  terraform-nodes:
+    runs-on: ubuntu-latest
+    needs: configure-kubeconfig
+    outputs:
+      ecr_repository_url: ${{ steps.tf-outputs.outputs.ecr_repository_url }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - name: Terraform Apply (Full)
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v2
+        with:
+          terraform_version: 1.5.0
+
+      - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -auto-approve
+        run: terraform init -input=false
 
-      - name: Get Terraform Outputs
+      - name: Apply Nodes + ECR
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: terraform apply -auto-approve \
+              -target=aws_eks_node_group.ashapp_nodes \
+              -target=aws_ecr_repository.ashapp
+
+      - name: Get Terraform Outputs (Nodes/ECR)
         id: tf-outputs
         working-directory: ${{ env.TF_WORKING_DIR }}
+        run: echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
+
+  wait-for-nodes:
+    runs-on: ubuntu-latest
+    needs: terraform-nodes
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v3
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION }}
+
+      - name: Setup kubectl
+        uses: azure/setup-kubectl@v4
+        with:
+          version: '1.27.0'
+
+      - name: Update kubeconfig
         run: |
-          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url)" >> $GITHUB_OUTPUT
-          echo "eks_cluster_name=$(terraform output -raw eks_cluster_name)" >> $GITHUB_OUTPUT
+          aws eks update-kubeconfig \
+            --name "ashapp" \
+            --region "${{ secrets.AWS_REGION }}"
+
+      - name: Wait for EKS Nodes Ready
+        run: |
+          echo "Waiting for EKS nodes to be ready..."
+          for i in {1..30}; do
+            READY_NODES=$(kubectl get nodes --no-headers 2>/dev/null | grep -c ' Ready')
+            if [ "$READY_NODES" -ge 2 ]; then
+              echo "✅ EKS nodes are ready."
+              exit 0
+            fi
+            echo "Nodes not ready yet... retrying in 10s"
+            sleep 10
+          done
+          echo "❌ Timeout waiting for nodes."
+          exit 1
 
   build_and_push:
     runs-on: ubuntu-latest
-    needs: terraform_eks
+    needs: wait-for-nodes
     outputs:
       image_uri: ${{ steps.build.outputs.image_uri }}
     steps:
@@ -103,10 +161,10 @@ jobs:
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and Push Docker Image
+      - name: Build and Tag Docker Image
         id: build
         run: |
-          ECR_URL="${{ needs.terraform_eks.outputs.ecr_repository_url }}"
+          ECR_URL="${{ needs.terraform-nodes.outputs.ecr_repository_url }}"
           TAG="sha-${GITHUB_SHA::8}"
           docker build -t ${ECR_URL}:${TAG} -f ${{ env.DOCKERFILE_PATH }} .
           docker tag ${ECR_URL}:${TAG} ${ECR_URL}:latest
@@ -136,7 +194,7 @@ jobs:
       - name: Update kubeconfig
         run: |
           aws eks update-kubeconfig \
-            --name "${{ needs.terraform_eks.outputs.eks_cluster_name }}" \
+            --name "ashapp" \
             --region "${{ secrets.AWS_REGION }}"
 
       - name: Create AWS credentials secret in EKS

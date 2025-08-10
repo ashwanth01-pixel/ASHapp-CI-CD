@@ -14,6 +14,8 @@ env:
   AWS_REGION: us-east-1
   AWS_ACCOUNT_ID: 267092042432
   ECR_REPOSITORY_URL: 267092042432.dkr.ecr.us-east-1.amazonaws.com/ashapp
+  EKS_CLUSTER_NAME: ashapp-eks
+  K8S_SERVICE_NAME: ashapp-service
 
 jobs:
   build_and_push:
@@ -57,7 +59,7 @@ jobs:
           version: '1.27.0'
 
       - run: |
-          aws eks update-kubeconfig --name your-eks-cluster-name --region ${{ env.AWS_REGION }}
+          aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
       - run: |
           for i in {1..30}; do
@@ -73,3 +75,20 @@ jobs:
             ${{ env.DEPLOYMENT_CONTAINER_NAME }}=${IMAGE_URI} --record || true
           kubectl apply -f ${{ env.K8S_MANIFEST_DIR }}
           kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=180s
+
+      - id: get_external_ip
+        run: |
+          echo "Waiting for external IP of service '${{ env.K8S_SERVICE_NAME }}'..."
+          for i in {1..30}; do
+            EXTERNAL_IP=$(kubectl get svc ${{ env.K8S_SERVICE_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].hostname}' 2>/dev/null || true)
+            if [ -z "$EXTERNAL_IP" ]; then
+              EXTERNAL_IP=$(kubectl get svc ${{ env.K8S_SERVICE_NAME }} -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || true)
+            fi
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo "External IP found: $EXTERNAL_IP"
+              echo "external_ip=$EXTERNAL_IP" >> $GITHUB_OUTPUT
+              echo "::notice::External IP is $EXTERNAL_IP"
+              break
+            fi
+            sleep 10
+          done

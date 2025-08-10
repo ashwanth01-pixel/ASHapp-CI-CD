@@ -12,6 +12,8 @@ env:
   K8S_MANIFEST_DIR: ./k8s
   DEPLOYMENT_NAME: ashapp
   DEPLOYMENT_CONTAINER_NAME: ashapp
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: 267092042432
 
 jobs:
   terraform:
@@ -28,12 +30,12 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v2
         with:
-          terraform_version: 1.5.0
+          terraform_version: 1.5.7
 
       - name: Terraform Init
         working-directory: ${{ env.TF_WORKING_DIR }}
@@ -66,7 +68,12 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Install Python dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip3 install -r backend/requirements.txt
 
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
@@ -94,7 +101,7 @@ jobs:
         with:
           aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
 
       - name: Setup kubectl
         uses: azure/setup-kubectl@v4
@@ -105,7 +112,7 @@ jobs:
         run: |
           echo "Waiting for EKS cluster to be active..."
           for i in {1..30}; do
-            STATUS=$(aws eks describe-cluster --name "${{ needs.terraform.outputs.eks_cluster_name }}" --region "${{ secrets.AWS_REGION }}" --query "cluster.status" --output text || echo "NOT_FOUND")
+            STATUS=$(aws eks describe-cluster --name "${{ needs.terraform.outputs.eks_cluster_name }}" --region "${{ env.AWS_REGION }}" --query "cluster.status" --output text || echo "NOT_FOUND")
             if [ "$STATUS" == "ACTIVE" ]; then
               echo "✅ EKS cluster is active!"
               break
@@ -118,7 +125,7 @@ jobs:
         run: |
           aws eks update-kubeconfig \
             --name "${{ needs.terraform.outputs.eks_cluster_name }}" \
-            --region "${{ secrets.AWS_REGION }}"
+            --region "${{ env.AWS_REGION }}"
 
       - name: Wait for EKS Nodes to be Ready
         run: |

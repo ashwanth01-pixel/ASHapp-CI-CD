@@ -39,22 +39,23 @@ jobs:
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform init -input=false
 
-      # First apply only EKS infra so kubeconfig works
+      # Step 1 — Create EKS cluster and node group first
       - name: Terraform Apply (EKS Infra Only)
         working-directory: ${{ env.TF_WORKING_DIR }}
-        run: terraform apply -auto-approve \
-             -target=aws_eks_cluster.ashapp \
-             -target=aws_eks_node_group.ashapp_nodes
+        run: |
+          terraform apply -auto-approve \
+            -target=aws_eks_cluster.ashapp \
+            -target=aws_eks_node_group.ashapp_nodes
 
-      # Configure kubeconfig so Helm & k8s providers work
-      - name: Update kubeconfig for EKS
+      # Step 2 — Update kubeconfig so Terraform Helm provider can work
+      - name: Configure kubeconfig for EKS
         run: |
           aws eks update-kubeconfig \
-            --name "$(terraform -chdir=${{ env.TF_WORKING_DIR }} output -raw eks_cluster_name)" \
-            --region "${{ secrets.AWS_REGION }}"
+            --region "${{ secrets.AWS_REGION }}" \
+            --name ashapp
 
-      # Apply remaining Terraform resources (ECR, Prometheus, etc.)
-      - name: Terraform Apply (Remaining Resources)
+      # Step 3 — Apply all remaining resources (ECR, IAM, Helm, etc.)
+      - name: Terraform Apply (All)
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: terraform apply -auto-approve
 

@@ -49,10 +49,8 @@ jobs:
         id: get-outputs
         working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
-          ECR_URL=$(terraform output -raw ecr_repository_url 2>/dev/null | tr -d '\r')
-          CLUSTER_NAME=$(terraform output -raw eks_cluster_name 2>/dev/null | tr -d '\r')
-          echo "ecr_repository_url=${ECR_URL}" >> $GITHUB_OUTPUT
-          echo "eks_cluster_name=${CLUSTER_NAME}" >> $GITHUB_OUTPUT
+          echo "ecr_repository_url=$(terraform output -raw ecr_repository_url | tr -d '\r')" >> $GITHUB_OUTPUT
+          echo "eks_cluster_name=$(terraform output -raw eks_cluster_name | tr -d '\r')" >> $GITHUB_OUTPUT
 
   build_and_push:
     runs-on: ubuntu-latest
@@ -70,15 +68,10 @@ jobs:
           aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install Python dependencies
-        run: |
-          python3 -m pip install --upgrade pip
-          pip3 install -r backend/requirements.txt
-
       - name: Login to Amazon ECR
         uses: aws-actions/amazon-ecr-login@v1
 
-      - name: Build and Tag Docker Image
+      - name: Build and Push Docker Image
         id: build
         run: |
           ECR_URL="${{ needs.terraform.outputs.ecr_repository_url }}"
@@ -110,14 +103,16 @@ jobs:
 
       - name: Wait for EKS Cluster to be Ready
         run: |
-          echo "Waiting for EKS cluster to be active..."
           for i in {1..30}; do
-            STATUS=$(aws eks describe-cluster --name "${{ needs.terraform.outputs.eks_cluster_name }}" --region "${{ env.AWS_REGION }}" --query "cluster.status" --output text || echo "NOT_FOUND")
+            STATUS=$(aws eks describe-cluster \
+              --name "${{ needs.terraform.outputs.eks_cluster_name }}" \
+              --region "${{ env.AWS_REGION }}" \
+              --query "cluster.status" --output text || echo "NOT_FOUND")
             if [ "$STATUS" == "ACTIVE" ]; then
               echo "✅ EKS cluster is active!"
               break
             fi
-            echo "⏳ Still waiting for EKS cluster..."
+            echo "⏳ Waiting for EKS cluster..."
             sleep 20
           done
 
@@ -129,14 +124,13 @@ jobs:
 
       - name: Wait for EKS Nodes to be Ready
         run: |
-          echo "Waiting for nodes to be ready..."
           for i in {1..30}; do
-            if kubectl get nodes 2>/dev/null | grep -q "Ready"; then
+            if kubectl get nodes 2>/dev/null | grep -q " Ready "; then
               echo "✅ Nodes are ready!"
               kubectl get nodes
               break
             fi
-            echo "⏳ Still waiting for nodes..."
+            echo "⏳ Waiting for nodes..."
             sleep 10
           done
 
@@ -150,7 +144,7 @@ jobs:
       - name: Deploy to EKS
         run: |
           IMAGE_URI="${{ needs.build_and_push.outputs.image_uri }}"
-          kubectl -n default set image deployment/${{ env.DEPLOYMENT_NAME }} \
+          kubectl set image deployment/${{ env.DEPLOYMENT_NAME }} \
             ${{ env.DEPLOYMENT_CONTAINER_NAME }}=${IMAGE_URI} --record || true
           kubectl apply -f ${{ env.K8S_MANIFEST_DIR }}
           kubectl rollout status deployment/${{ env.DEPLOYMENT_NAME }} --timeout=180s

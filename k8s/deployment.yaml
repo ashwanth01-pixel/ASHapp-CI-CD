@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
       - name: ashapp
-        image: 267092042432.dkr.ecr.us-east-1.amazonaws.com/ashapp-ecr:latest
+        image: <ECR_REPOSITORY_URL>:latest
         ports:
         - containerPort: 5000
         env:

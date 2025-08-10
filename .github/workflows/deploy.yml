@@ -49,8 +49,8 @@ jobs:
         run: |
           ECR_URL=$(terraform output -raw ecr_repository_url 2>/dev/null | tr -d '\r')
           CLUSTER_NAME=$(terraform output -raw eks_cluster_name 2>/dev/null | tr -d '\r')
-          echo "ecr_repository_url=$ECR_URL" >> $GITHUB_OUTPUT
-          echo "eks_cluster_name=$CLUSTER_NAME" >> $GITHUB_OUTPUT
+          echo "ecr_repository_url=${ECR_URL}" >> $GITHUB_OUTPUT
+          echo "eks_cluster_name=${CLUSTER_NAME}" >> $GITHUB_OUTPUT
 
   build_and_push:
     runs-on: ubuntu-latest
@@ -84,7 +84,7 @@ jobs:
 
   deploy:
     runs-on: ubuntu-latest
-    needs: build_and_push
+    needs: [terraform, build_and_push]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -105,11 +105,12 @@ jobs:
         run: |
           echo "Waiting for EKS cluster to be active..."
           for i in {1..30}; do
-            if aws eks describe-cluster --name "${{ needs.terraform.outputs.eks_cluster_name }}" --region "${{ secrets.AWS_REGION }}" --query "cluster.status" --output text | grep -q "ACTIVE"; then
-              echo "EKS cluster is active!"
+            STATUS=$(aws eks describe-cluster --name "${{ needs.terraform.outputs.eks_cluster_name }}" --region "${{ secrets.AWS_REGION }}" --query "cluster.status" --output text || echo "NOT_FOUND")
+            if [ "$STATUS" == "ACTIVE" ]; then
+              echo "✅ EKS cluster is active!"
               break
             fi
-            echo "Still waiting..."
+            echo "⏳ Still waiting for EKS cluster..."
             sleep 20
           done
 
@@ -124,10 +125,11 @@ jobs:
           echo "Waiting for nodes to be ready..."
           for i in {1..30}; do
             if kubectl get nodes 2>/dev/null | grep -q "Ready"; then
+              echo "✅ Nodes are ready!"
               kubectl get nodes
               break
             fi
-            echo "Still waiting for nodes..."
+            echo "⏳ Still waiting for nodes..."
             sleep 10
           done
 

@@ -5,14 +5,6 @@ terraform {
       source  = "hashicorp/aws"
       version = "~> 5.0"
     }
-    kubernetes = {
-      source  = "hashicorp/kubernetes"
-      version = "~> 2.0"
-    }
-    helm = {
-      source  = "hashicorp/helm"
-      version = "~> 2.0"
-    }
   }
 
   backend "s3" {
@@ -22,7 +14,6 @@ terraform {
     dynamodb_table = "ashapp-terraform-lock"
     encrypt        = true
   }
-}
 
 provider "aws" {
   region = var.aws_region
@@ -40,7 +31,7 @@ data "aws_subnets" "filtered" {
 
   filter {
     name   = "availability-zone"
-    values = ["us-east-1a", "us-east-1b", "us-east-1c"]
+    values = ["us-east-1a", "us-east-1b"]
   }
 }
 

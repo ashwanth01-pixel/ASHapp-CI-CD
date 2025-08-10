@@ -63,6 +63,13 @@ jobs:
       - run: |
           aws eks update-kubeconfig --name ${{ env.EKS_CLUSTER_NAME }} --region ${{ env.AWS_REGION }}
 
+      - name: Create Kubernetes secret for AWS credentials
+        run: |
+          kubectl delete secret aws-credentials --ignore-not-found
+          kubectl create secret generic aws-credentials \
+            --from-literal=aws_access_key_id=${{ secrets.AWS_ACCESS_KEY_ID }} \
+            --from-literal=aws_secret_access_key=${{ secrets.AWS_SECRET_ACCESS_KEY }}
+
       - run: |
           for i in {1..30}; do
             if kubectl get nodes 2>/dev/null | grep -q " Ready "; then

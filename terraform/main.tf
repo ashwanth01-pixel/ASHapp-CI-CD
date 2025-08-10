@@ -19,9 +19,14 @@ terraform {
     }
   }
 
-  backend "local" {
-    path = "terraform.tfstate"
-  }
+  backend "s3" {
+  bucket         = "ashapp-terraform-state"
+  key            = "ashapp/terraform.tfstate"
+  region         = "us-east-1"
+  dynamodb_table = "ashapp-terraform-lock"
+  encrypt        = true
+}
+
 }
 
 provider "aws" {

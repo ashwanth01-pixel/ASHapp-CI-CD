@@ -13,20 +13,15 @@ terraform {
       source  = "hashicorp/helm"
       version = "~> 2.0"
     }
-    null = {
-      source  = "hashicorp/null"
-      version = "~> 3.0"
-    }
   }
 
   backend "s3" {
-  bucket         = "ashapp-terraform-state"
-  key            = "ashapp/terraform.tfstate"
-  region         = "us-east-1"
-  dynamodb_table = "ashapp-terraform-lock"
-  encrypt        = true
-}
-
+    bucket         = "ashapp-terraform-state"
+    key            = "ashapp/terraform.tfstate"
+    region         = "us-east-1"
+    dynamodb_table = "ashapp-terraform-lock"
+    encrypt        = true
+  }
 }
 
 provider "aws" {
@@ -149,6 +144,3 @@ resource "aws_eks_node_group" "ashapp_nodes" {
     Environment = "production"
   }
 }
-
-
-

@@ -98,5 +98,21 @@ terraform apply
 
 terraform destroy -auto-approve
 
+if any infra is already existed, make tfstate to tack of it or it gives error:-
+
+terraform import <resource_type>.<resource_name> <existing_resource_id>
+
+eg:- terraform import aws_s3_bucket.mybucket existing-bucket-name
+
+to not track for tfstate:-
+
+terraform state rm
+
+eg:- terraform state rm helm_release.prometheus
+
+terraform state rm null_resource.wait_for_eks
+
+
+
 
 http://adf02f840ea4b4bb3b7e98040f964a69-2033947579.us-east-1.elb.amazonaws.com:5000/
